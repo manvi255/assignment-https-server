@@ -80,7 +80,7 @@ def run_server():
                         body = value
             status_line = "HTTP/1.1 200 OK"
 
-        # 3. POST /data
+        # 3. POST /data (store JSON)
         elif method == "POST" and path == "/data":
             content_type = headers.get("content-type", "")
             content_length = int(headers.get("content-length", 0))
@@ -100,7 +100,34 @@ def run_server():
                     body = "Data stored successfully!"
                     status_line = "HTTP/1.1 200 OK"
 
-        # 4. 404 fallback
+        # 4. GET /data → return all items
+        elif method == "GET" and path == "/data":
+            body = json.dumps(DATA_STORE)
+            status_line = "HTTP/1.1 200 OK"
+
+        # 5. GET /data/<id>
+        elif method == "GET" and path.startswith("/data/"):
+            try:
+                item_id = int(path.split("/")[2])
+                item = DATA_STORE[item_id]
+                body = json.dumps(item)
+                status_line = "HTTP/1.1 200 OK"
+            except (ValueError, IndexError):
+                body = "Item not found"
+                status_line = "HTTP/1.1 404 Not Found"
+
+        # 6. DELETE /data/<id>
+        elif method == "DELETE" and path.startswith("/data/"):
+            try:
+                item_id = int(path.split("/")[2])
+                DATA_STORE.pop(item_id)
+                body = "Item deleted"
+                status_line = "HTTP/1.1 200 OK"
+            except (ValueError, IndexError):
+                body = "Item not found"
+                status_line = "HTTP/1.1 404 Not Found"
+
+        # 7. 404 fallback
         else:
             body = "404 Not Found"
             status_line = "HTTP/1.1 404 Not Found"
@@ -108,7 +135,7 @@ def run_server():
         # Build final response
         response = (
             f"{status_line}\r\n"
-            "Content-Type: text/plain\r\n"
+            "Content-Type: application/json\r\n"
             f"Content-Length: {len(body)}\r\n"
             "\r\n"
             f"{body}"
