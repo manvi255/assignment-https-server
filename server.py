@@ -1,7 +1,11 @@
 import socket
+import json
 
 HOST = "0.0.0.0"
 PORT = 8080
+
+DATA_STORE = []
+
 
 def run_server():
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -17,35 +21,33 @@ def run_server():
 
         raw_request = client_socket.recv(4096)
 
-        # If nothing received, skip this client
         if not raw_request:
             client_socket.close()
             continue
 
-        # Decode bytes -> string
         request_text = raw_request.decode("iso-8859-1")
 
         print("\n----- RAW HTTP REQUEST START -----")
         print(request_text)
         print("----- RAW HTTP REQUEST END -----\n")
 
-        # STEP 1: Split headers and body
+        # STEP 1: Split headers + body
         parts = request_text.split("\r\n\r\n", 1)
         header_section = parts[0]
+        body_section = parts[1] if len(parts) > 1 else ""
 
-        # STEP 2: Split header section into lines
+        # STEP 2: Break header section into lines
         lines = header_section.split("\r\n")
 
-        # STEP 3: Parse request line (method, path, version)
-        request_line = lines[0]
-        method, path, version = request_line.split(" ", 2)
+        # STEP 3: Parse request line
+        method, path, version = lines[0].split(" ", 2)
 
         print("Parsed Request Line:")
         print("  Method:", method)
         print("  Path:", path)
         print("  Version:", version)
 
-        # STEP 4: Parse headers into dictionary
+        # STEP 4: Parse headers
         headers = {}
         for line in lines[1:]:
             if ": " in line:
@@ -55,35 +57,55 @@ def run_server():
         print("\nParsed Headers:")
         print(headers)
 
+        print("\nParsed Body Section:")
+        print(body_section)
+
         # ============================
-        # PHASE 3: ROUTING STARTS HERE
+        # ROUTING START
         # ============================
 
-        # 1. Route: GET /
+        # 1. GET /
         if method == "GET" and path == "/":
             body = "Welcome to my custom HTTP server!"
             status_line = "HTTP/1.1 200 OK"
 
-        # 2. Route: GET /echo?msg=...
+        # 2. GET /echo
         elif method == "GET" and path.startswith("/echo"):
             body = "No message provided."
-
             if "?" in path:
-                query_string = path.split("?", 1)[1]   # msg=hello
-
-                if "=" in query_string:
-                    key, value = query_string.split("=", 1)
+                query = path.split("?", 1)[1]
+                if "=" in query:
+                    key, value = query.split("=", 1)
                     if key == "msg":
                         body = value
-
             status_line = "HTTP/1.1 200 OK"
 
-        # 3. Route not found → 404
+        # 3. POST /data
+        elif method == "POST" and path == "/data":
+            content_type = headers.get("content-type", "")
+            content_length = int(headers.get("content-length", 0))
+
+            if content_type != "application/json":
+                body = "Unsupported Content-Type"
+                status_line = "HTTP/1.1 400 Bad Request"
+            else:
+                json_body = body_section[:content_length]
+                try:
+                    data = json.loads(json_body)
+                except json.JSONDecodeError:
+                    body = "Invalid JSON"
+                    status_line = "HTTP/1.1 400 Bad Request"
+                else:
+                    DATA_STORE.append(data)
+                    body = "Data stored successfully!"
+                    status_line = "HTTP/1.1 200 OK"
+
+        # 4. 404 fallback
         else:
             body = "404 Not Found"
             status_line = "HTTP/1.1 404 Not Found"
 
-        # Build HTTP response
+        # Build final response
         response = (
             f"{status_line}\r\n"
             "Content-Type: text/plain\r\n"
@@ -92,11 +114,11 @@ def run_server():
             f"{body}"
         )
 
-        # Send response
         client_socket.sendall(response.encode("utf-8"))
         client_socket.close()
+
         # ============================
-        # PHASE 3: ROUTING ENDS HERE
+        # ROUTING END
         # ============================
 
 
