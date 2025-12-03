@@ -55,18 +55,50 @@ def run_server():
         print("\nParsed Headers:")
         print(headers)
 
-        # TEMPORARY RESPONSE
-        body = "Request parsed successfully!"
+        # ============================
+        # PHASE 3: ROUTING STARTS HERE
+        # ============================
+
+        # 1. Route: GET /
+        if method == "GET" and path == "/":
+            body = "Welcome to my custom HTTP server!"
+            status_line = "HTTP/1.1 200 OK"
+
+        # 2. Route: GET /echo?msg=...
+        elif method == "GET" and path.startswith("/echo"):
+            body = "No message provided."
+
+            if "?" in path:
+                query_string = path.split("?", 1)[1]   # msg=hello
+
+                if "=" in query_string:
+                    key, value = query_string.split("=", 1)
+                    if key == "msg":
+                        body = value
+
+            status_line = "HTTP/1.1 200 OK"
+
+        # 3. Route not found → 404
+        else:
+            body = "404 Not Found"
+            status_line = "HTTP/1.1 404 Not Found"
+
+        # Build HTTP response
         response = (
-            "HTTP/1.1 200 OK\r\n"
+            f"{status_line}\r\n"
             "Content-Type: text/plain\r\n"
             f"Content-Length: {len(body)}\r\n"
             "\r\n"
             f"{body}"
         )
 
+        # Send response
         client_socket.sendall(response.encode("utf-8"))
         client_socket.close()
+        # ============================
+        # PHASE 3: ROUTING ENDS HERE
+        # ============================
+
 
 if __name__ == "__main__":
     run_server()
