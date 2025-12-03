@@ -7,6 +7,46 @@ PORT = 8080
 DATA_STORE = []
 
 
+# ============================
+# HELPER FUNCTIONS
+# ============================
+
+def build_response(body, status="200 OK", content_type="text/plain"):
+    """Builds a valid HTTP/1.1 response."""
+    
+    if isinstance(body, (dict, list)):  # Auto-convert dict/list to JSON
+        body = json.dumps(body, indent=2)
+        content_type = "application/json"
+    
+    body_bytes = body.encode("utf-8")
+    
+    response = (
+        f"HTTP/1.1 {status}\r\n"
+        f"Content-Type: {content_type}\r\n"
+        f"Content-Length: {len(body_bytes)}\r\n"
+        "\r\n"
+    ).encode("utf-8") + body_bytes
+    
+    return response
+
+
+def send_json(data, status="200 OK"):
+    """Shortcut for sending JSON responses."""
+    return build_response(data, status=status, content_type="application/json")
+
+
+def parse_path_and_id(path):
+    """Extract ID from paths like /data/3."""
+    parts = path.split("/")
+    if len(parts) == 3 and parts[2].isdigit():
+        return int(parts[2])
+    return None
+
+
+# ============================
+# SERVER START
+# ============================
+
 def run_server():
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -27,127 +67,101 @@ def run_server():
 
         request_text = raw_request.decode("iso-8859-1")
 
-        print("\n----- RAW HTTP REQUEST START -----")
-        print(request_text)
-        print("----- RAW HTTP REQUEST END -----\n")
-
-        # STEP 1: Split headers + body
+        # Parse request
         parts = request_text.split("\r\n\r\n", 1)
         header_section = parts[0]
         body_section = parts[1] if len(parts) > 1 else ""
-
-        # STEP 2: Break header section into lines
         lines = header_section.split("\r\n")
 
-        # STEP 3: Parse request line
         method, path, version = lines[0].split(" ", 2)
 
-        print("Parsed Request Line:")
-        print("  Method:", method)
-        print("  Path:", path)
-        print("  Version:", version)
-
-        # STEP 4: Parse headers
+        # Parse headers
         headers = {}
         for line in lines[1:]:
             if ": " in line:
                 key, value = line.split(": ", 1)
                 headers[key.lower()] = value
 
-        print("\nParsed Headers:")
-        print(headers)
-
-        print("\nParsed Body Section:")
-        print(body_section)
-
         # ============================
-        # ROUTING START
+        # ROUTING (Cleaner Structure)
         # ============================
 
-        # 1. GET /
-        if method == "GET" and path == "/":
-            body = "Welcome to my custom HTTP server!"
-            status_line = "HTTP/1.1 200 OK"
+        # ---------- GET ROUTES ----------
+        if method == "GET":
 
-        # 2. GET /echo
-        elif method == "GET" and path.startswith("/echo"):
-            body = "No message provided."
-            if "?" in path:
-                query = path.split("?", 1)[1]
-                if "=" in query:
-                    key, value = query.split("=", 1)
-                    if key == "msg":
-                        body = value
-            status_line = "HTTP/1.1 200 OK"
+            # GET /
+            if path == "/":
+                response = build_response("Welcome to my improved HTTP server!")
 
-        # 3. POST /data (store JSON)
-        elif method == "POST" and path == "/data":
-            content_type = headers.get("content-type", "")
-            content_length = int(headers.get("content-length", 0))
+            # GET /echo?msg=
+            elif path.startswith("/echo"):
+                body = "No message given"
+                if "?" in path:
+                    query = path.split("?", 1)[1]
+                    if "=" in query:
+                        key, value = query.split("=", 1)
+                        if key == "msg":
+                            body = value
+                response = build_response(body)
 
-            if content_type != "application/json":
-                body = "Unsupported Content-Type"
-                status_line = "HTTP/1.1 400 Bad Request"
-            else:
-                json_body = body_section[:content_length]
-                try:
-                    data = json.loads(json_body)
-                except json.JSONDecodeError:
-                    body = "Invalid JSON"
-                    status_line = "HTTP/1.1 400 Bad Request"
+            # GET /data
+            elif path == "/data":
+                response = send_json(DATA_STORE)
+
+            # GET /data/<id>
+            elif path.startswith("/data/"):
+                item_id = parse_path_and_id(path)
+                if item_id is None or item_id >= len(DATA_STORE):
+                    response = send_json({"error": "Item not found"}, "404 Not Found")
                 else:
-                    DATA_STORE.append(data)
-                    body = "Data stored successfully!"
-                    status_line = "HTTP/1.1 200 OK"
+                    response = send_json(DATA_STORE[item_id])
 
-        # 4. GET /data → return all items
-        elif method == "GET" and path == "/data":
-            body = json.dumps(DATA_STORE)
-            status_line = "HTTP/1.1 200 OK"
+            else:
+                response = send_json({"error": "Route not found"}, "404 Not Found")
 
-        # 5. GET /data/<id>
-        elif method == "GET" and path.startswith("/data/"):
-            try:
-                item_id = int(path.split("/")[2])
-                item = DATA_STORE[item_id]
-                body = json.dumps(item)
-                status_line = "HTTP/1.1 200 OK"
-            except (ValueError, IndexError):
-                body = "Item not found"
-                status_line = "HTTP/1.1 404 Not Found"
+        # ---------- POST ROUTES ----------
+        elif method == "POST":
 
-        # 6. DELETE /data/<id>
-        elif method == "DELETE" and path.startswith("/data/"):
-            try:
-                item_id = int(path.split("/")[2])
-                DATA_STORE.pop(item_id)
-                body = "Item deleted"
-                status_line = "HTTP/1.1 200 OK"
-            except (ValueError, IndexError):
-                body = "Item not found"
-                status_line = "HTTP/1.1 404 Not Found"
+            # POST /data
+            if path == "/data":
+                content_length = int(headers.get("content-length", 0))
+                content_type = headers.get("content-type", "")
 
-        # 7. 404 fallback
+                if content_type != "application/json":
+                    response = send_json({"error": "Content-Type must be application/json"}, "400 Bad Request")
+                else:
+                    raw_json = body_section[:content_length]
+                    try:
+                        data = json.loads(raw_json)
+                        DATA_STORE.append(data)
+                        response = send_json({"message": "Data stored successfully"})
+                    except json.JSONDecodeError:
+                        response = send_json({"error": "Invalid JSON"}, "400 Bad Request")
+
+            else:
+                response = send_json({"error": "Route not found"}, "404 Not Found")
+
+        # ---------- DELETE ROUTES ----------
+        elif method == "DELETE":
+
+            if path.startswith("/data/"):
+                item_id = parse_path_and_id(path)
+                if item_id is None or item_id >= len(DATA_STORE):
+                    response = send_json({"error": "Item not found"}, "404 Not Found")
+                else:
+                    DATA_STORE.pop(item_id)
+                    response = send_json({"message": "Item deleted"})
+            else:
+                response = send_json({"error": "Route not found"}, "404 Not Found")
+
+        # ---------- UNSUPPORTED METHOD ----------
         else:
-            body = "404 Not Found"
-            status_line = "HTTP/1.1 404 Not Found"
+            response = send_json({"error": "Method not allowed"}, "405 Method Not Allowed")
 
-        # Build final response
-        response = (
-            f"{status_line}\r\n"
-            "Content-Type: application/json\r\n"
-            f"Content-Length: {len(body)}\r\n"
-            "\r\n"
-            f"{body}"
-        )
-
-        client_socket.sendall(response.encode("utf-8"))
+        client_socket.sendall(response)
         client_socket.close()
 
-        # ============================
-        # ROUTING END
-        # ============================
 
-
+# Run server
 if __name__ == "__main__":
     run_server()
